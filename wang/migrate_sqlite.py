@@ -3,6 +3,7 @@
 import argparse
 import os
 import sqlite3
+from contextlib import closing
 from pathlib import Path
 
 from psycopg import sql
@@ -25,10 +26,10 @@ def migrate(source, dsn=None):
     Knowledge(db_path=store.dsn)
     store.initialize('CREATE TABLE IF NOT EXISTS shop_settings (id INTEGER PRIMARY KEY, payload TEXT)')
     snapshot = sqlite3.connect(':memory:')
-    with sqlite3.connect(source.as_uri() + '?mode=ro', uri=True) as original:
-        original.backup(snapshot)
     counts = {}
     try:
+        with closing(sqlite3.connect(source.as_uri() + '?mode=ro', uri=True)) as original:
+            original.backup(snapshot)
         with store.db() as db:
             db.execute('SELECT pg_advisory_xact_lock(79214002)')
             for table in TABLES:

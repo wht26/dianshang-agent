@@ -96,3 +96,45 @@ def test_sqlite_migration_preserves_source_and_sequence(tmp_path):
         migrate(source, target.dsn)
     with target.db() as db:
         assert db.execute('SELECT COUNT(*) FROM qa_turns').fetchone()['count'] == 2
+
+
+def test_bad_rate_configuration_is_unavailable(monkeypatch):
+    monkeypatch.setenv('WANG_CHAT_RATE_LIMIT', 'invalid')
+    control = RedisControl()
+    try:
+        with pytest.raises(HTTPException) as error:
+            asyncio.run(control.allow('buyer'))
+        assert error.value.status_code == 503
+    finally:
+        control.close()
+
+
+def test_cross_instance_knowledge_refresh_and_health(tmp_path):
+    from fastapi.testclient import TestClient
+    from wang.app import create_app
+    path = tmp_path / 'shared-store'
+    with TestClient(create_app(path)) as first, TestClient(create_app(path)) as second:
+        response = first.post('/api/knowledge/import', headers={'X-Wang-Client': 'web'},
+                              json={'title': 'Shared document', 'content': 'Shared knowledge content'})
+        assert response.status_code == 200
+        document_id = response.json()['id']
+        assert any(doc['id'] == document_id for doc in second.get('/api/knowledge').json()['documents'])
+        health = second.get('/health')
+        assert health.status_code == 200
+        assert health.json()['database'] == 'postgresql'
+        assert health.json()['coordination'] == 'redis'
+
+
+def test_migration_rolls_back_all_inserted_rows(tmp_path):
+    import psycopg
+    source = tmp_path / 'broken.db'
+    with sqlite3.connect(source) as db:
+        db.executescript('CREATE TABLE qa_sessions(digest TEXT PRIMARY KEY, created REAL); '
+                         'CREATE TABLE qa_turns(unknown_column TEXT);')
+        db.execute('INSERT INTO qa_sessions VALUES (?,?)', ('must-rollback', 1700000000))
+        db.execute("INSERT INTO qa_turns VALUES ('invalid schema')")
+    target = Store(tmp_path / 'rollback-target')
+    with pytest.raises(psycopg.errors.UndefinedColumn):
+        migrate(source, target.dsn)
+    with target.db() as db:
+        assert db.execute('SELECT COUNT(*) FROM qa_sessions').fetchone()['count'] == 0

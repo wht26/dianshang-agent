@@ -45,8 +45,11 @@ class RedisControl:
         return bool(await self.call(self.client.exists, self.key))
 
     async def allow(self, identity):
-        limit = int(os.getenv('WANG_CHAT_RATE_LIMIT', '60'))
-        window = int(os.getenv('WANG_CHAT_RATE_WINDOW', '60'))
+        try:
+            limit = int(os.getenv('WANG_CHAT_RATE_LIMIT', '60'))
+            window = int(os.getenv('WANG_CHAT_RATE_WINDOW', '60'))
+        except ValueError:
+            raise HTTPException(503, '限流配置无效。') from None
         if not 1 <= limit <= 10000 or not 1 <= window <= 3600:
             raise HTTPException(503, '限流配置无效。')
         count = await self.call(self.client.eval, RATE, 1, self.prefix + ':rate:' + identity, window)

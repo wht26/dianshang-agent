@@ -2,7 +2,10 @@ $ErrorActionPreference = 'Stop'
 foreach ($setting in @('WANG_POSTGRES_PASSWORD', 'WANG_REDIS_PASSWORD')) {
     $existing = [Environment]::GetEnvironmentVariable($setting, 'User')
     if (-not $existing) {
-        $existing = [Convert]::ToHexString([Security.Cryptography.RandomNumberGenerator]::GetBytes(32))
+        $bytes = New-Object byte[] 32
+        $rng = [Security.Cryptography.RandomNumberGenerator]::Create()
+        try { $rng.GetBytes($bytes) } finally { $rng.Dispose() }
+        $existing = [BitConverter]::ToString($bytes).Replace('-', '').ToLowerInvariant()
         [Environment]::SetEnvironmentVariable($setting, $existing, 'User')
     }
     [Environment]::SetEnvironmentVariable($setting, $existing, 'Process')
