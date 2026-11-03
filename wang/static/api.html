@@ -1,0 +1,12 @@
+<!doctype html>
+<html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>wang · 业务接口调试</title><link rel="stylesheet" href="/static/api.css"><script src="/static/api.js" defer></script></head>
+<body><main><a href="/">← 返回客服</a><h1>商家业务接口</h1><p>本机调试入口。写操作会修改实际业务记录；退款执行会调用已配置的支付渠道。请先阅读接入说明并核对请求。</p>
+<label for="admin-token">管理员令牌（只用于商家请求，不保存）</label><input id="admin-token" type="password" autocomplete="off">
+<label for="operation">选择接口</label><select id="operation"></select>
+<label for="api-path">请求路径（替换其中的 {id} 等参数）</label><input id="api-path" type="text">
+<details><summary>请求字段说明</summary><pre id="schema"></pre></details>
+<label for="api-body">请求 JSON（GET 无需填写）</label><textarea id="api-body" rows="12" spellcheck="false">{}</textarea>
+<label class="confirm"><input type="checkbox" id="write-confirm">我已核对请求，确认执行这次写操作</label>
+<button id="run" type="button">发送请求</button><p id="status" role="status"></p>
+<h2>响应</h2><p>订单创建或凭证重发响应可能含访问凭证，请只交给对应买家，勿截图或公开。</p><pre id="result"></pre>
+<a href="/openapi.json">完整 OpenAPI 结构</a></main></body></html>

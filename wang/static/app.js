@@ -222,3 +222,64 @@ document.querySelector('#shop-import').addEventListener('click', async () => {
     kbStatus.textContent = '已保存' + result.name + '，刷新后载入商品；建议开启新对话。';
   } catch (error) { kbStatus.textContent = error.message; }
 });
+
+// Buyer mutations require an explicit action; chat text cannot submit a refund.
+const orderStatus = document.querySelector('#order-status');
+const orderSummary = document.querySelector('#order-summary');
+const orderLabels = {awaiting_shipment:'待发货',shipped:'已发货',delivered:'已签收',closed:'已关闭',
+  requested:'待商家审核',approved:'审核通过，待执行',executing:'正在执行',submitted:'渠道处理中',
+  uncertain:'结果待核验',succeeded:'渠道确认退款成功',failed:'渠道确认失败',rejected:'未通过审核'};
+let refundAttempt = null;
+function renderOrder(order) {
+  orderSummary.replaceChildren();
+  const lines = [
+    `渠道：${{native:'自建商城',taobao:'淘宝',douyin:'抖店'}[order.source] || order.source}`,
+    `订单状态：${orderLabels[order.status] || order.status}`,
+    `已登记实付：${(order.amount_cents / 100).toFixed(2)}元`,
+    ...order.items.map(i => `${i.name} × ${i.quantity}`),
+    '物流：' + (order.shipment.event || '暂无物流节点'),
+    ...(order.shipment_events || []).slice(-5).map(e => `${new Date(e.updated_at*1000).toLocaleString()} · ${e.event}`),
+    ...order.refunds.map(r => `退款${(r.amount_cents/100).toFixed(2)}元：${orderLabels[r.status] || r.status}`),
+    '以上为已同步或登记的业务记录，不保证实时状态。'
+  ];
+  for (const text of lines) {const p = document.createElement('p');p.textContent = text;orderSummary.append(p);}
+}
+async function orderAction(button, action) {
+  if (busy || button.disabled) return;
+  button.disabled = true;
+  try {await action();} catch (error) {orderStatus.textContent = error.message;}
+  finally {button.disabled = false;}
+}
+document.querySelector('#order-bind').addEventListener('click', event => orderAction(event.target, async () => {
+  const field = document.querySelector('#order-access');
+  const order = await api('/api/commerce/access', {access_token:field.value.trim()});
+  field.value = '';
+  renderOrder(order);
+  refundAttempt = null;
+  orderStatus.textContent = '已关联。可直接询问订单或物流；平台数据请先刷新。';
+}));
+document.querySelector('#order-clear').addEventListener('click', event => orderAction(event.target, async () => {
+  await api('/api/commerce/access/clear', {});
+  orderSummary.replaceChildren();
+  refundAttempt = null;
+  orderStatus.textContent = '已解除。旧聊天仍会保留，交给其他买家使用前请开启新对话。';
+}));
+document.querySelector('#order-refresh').addEventListener('click', event => orderAction(event.target, async () => {
+  renderOrder(await api('/api/commerce/order/refresh', {}));
+  orderStatus.textContent = '已读取最新可用记录。';
+}));
+document.querySelector('#refund-submit').addEventListener('click', event => orderAction(event.target, async () => {
+  const amount = document.querySelector('#refund-amount').value.trim();
+  const reason = document.querySelector('#refund-reason').value.trim();
+  if (!document.querySelector('#refund-confirm').checked) throw new Error('请先确认提交退款申请。');
+  if (!/^\d{1,7}(\.\d{1,2})?$/.test(amount) || !reason) throw new Error('请填写有效金额和退款原因。');
+  const [yuan, fraction=''] = amount.split('.');
+  const cents = Number(yuan)*100+Number(fraction.padEnd(2,'0'));
+  const signature = JSON.stringify([cents, reason]);
+  if (!refundAttempt || refundAttempt.signature !== signature) refundAttempt = {signature,id:crypto.randomUUID()};
+  await api('/api/commerce/refunds', {request_id:refundAttempt.id,amount_cents:cents,reason});
+  document.querySelector('#refund-confirm').checked = false;
+  renderOrder(await api('/api/commerce/order'));
+  orderStatus.textContent = '申请已记录，等待商家审核；尚未执行退款。';
+}));
+api('/api/commerce/order').then(renderOrder).catch(() => {});

@@ -40,6 +40,23 @@
       <div id="kb-status" role="status"></div>
       <div id="kb-documents"></div>
     </details>
+    <details class="kb-panel" id="order-panel">
+      <summary>订单与售后服务</summary>
+      <p>使用商家单独发放的订单访问凭证关联订单，请勿在聊天中发送凭证。</p>
+      <label for="order-access">订单访问凭证</label>
+      <input id="order-access" type="password" autocomplete="off" maxlength="100">
+      <button id="order-bind" type="button">关联订单</button>
+      <button id="order-clear" type="button">解除关联</button>
+      <button id="order-refresh" type="button">刷新订单与物流</button>
+      <div id="order-status" role="status"></div>
+      <div id="order-summary"></div>
+      <label for="refund-amount">申请退款金额（元）</label>
+      <input id="refund-amount" type="number" min="0.01" step="0.01">
+      <label for="refund-reason">退款原因（勿填隐私）</label>
+      <input id="refund-reason" type="text" maxlength="500">
+      <label class="refund-confirm"><input id="refund-confirm" type="checkbox">我确认提交退款申请，等待商家审核；提交不代表退款成功。</label>
+      <button id="refund-submit" type="button">提交退款申请</button>
+    </details>
     <div class="topic-label">你可以和我聊</div>
     <div class="topics">
       <button data-question="我想了解这款商品的材质和颜色。">材质、颜色与款式</button>
@@ -49,7 +66,7 @@
       <button data-question="尺码不合适能换吗？需要满足什么条件？">退货、换码咨询</button>
       <button data-question="商品收到后发现质量问题，应该怎么办？">质量问题与人工核验</button>
     </div>
-    <div class="sidebar-footer"><span class="status-dot"></span><span id="mode">正在连接…</span><small>v0.8 · 买家咨询</small></div>
+    <div class="sidebar-footer"><span class="status-dot"></span><span id="mode">正在连接…</span><small>v0.9 · 买家服务</small></div>
   </aside>
   <main>
     <header><span id="shop-name">店铺客服</span><span class="header-tag" id="shop-badge">正在连接</span></header>
@@ -75,7 +92,7 @@
         <textarea id="question" placeholder="例如：这款T恤怎么选码？鞋子开胶怎么办？…" rows="2" maxlength="6000" required></textarea>
         <div class="composer-bottom"><span>Enter 发送 · Shift + Enter 换行</span><button id="send" type="submit">发送 ↑</button></div>
       </form>
-      <p class="footnote" id="footnote">按已提供的商品与店铺资料回答；不查询订单或执行退款。请勿输入联系方式、地址或支付信息。</p>
+      <p class="footnote" id="footnote">可在订单服务中关联订单、查看物流和申请退款；实际退款由商家审批并通过已授权渠道执行。请勿在聊天中输入隐私或访问凭证。</p>
     </div>
   </main>
 </body></html>

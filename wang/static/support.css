@@ -13,3 +13,4 @@ aside>*{flex-shrink:0}.kb-panel{max-height:none;overflow:visible;min-height:auto
  .kb-panel,.kb-panel:not([open]){position:static;max-width:none;padding:0;margin:4px 0;z-index:auto}
  .topic-label,.topics,.sidebar-footer{display:none}main{height:58dvh;min-height:350px}
 }
+#order-summary p{margin:7px 0;overflow-wrap:anywhere}.refund-confirm{line-height:1.8}.refund-confirm input{width:auto}

@@ -1,0 +1,297 @@
+{
+  "StockChange": {
+    "additionalProperties": false,
+    "properties": {
+      "sku": {
+        "pattern": "^[a-zA-Z0-9_-]{1,60}$",
+        "title": "Sku",
+        "type": "string"
+      },
+      "product_id": {
+        "maxLength": 60,
+        "minLength": 1,
+        "title": "Product Id",
+        "type": "string"
+      },
+      "delta": {
+        "maximum": 1000000,
+        "minimum": -1000000,
+        "title": "Delta",
+        "type": "integer"
+      },
+      "expected_version": {
+        "minimum": 0,
+        "title": "Expected Version",
+        "type": "integer"
+      }
+    },
+    "required": [
+      "sku",
+      "product_id",
+      "delta",
+      "expected_version"
+    ],
+    "title": "StockChange",
+    "type": "object"
+  },
+  "OrderInput": {
+    "$defs": {
+      "Line": {
+        "additionalProperties": false,
+        "properties": {
+          "sku": {
+            "pattern": "^[a-zA-Z0-9_-]{1,60}$",
+            "title": "Sku",
+            "type": "string"
+          },
+          "name": {
+            "maxLength": 100,
+            "minLength": 1,
+            "title": "Name",
+            "type": "string"
+          },
+          "quantity": {
+            "maximum": 1000,
+            "minimum": 1,
+            "title": "Quantity",
+            "type": "integer"
+          },
+          "unit_cents": {
+            "maximum": 100000000,
+            "minimum": 0,
+            "title": "Unit Cents",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "sku",
+          "name",
+          "quantity",
+          "unit_cents"
+        ],
+        "title": "Line",
+        "type": "object"
+      }
+    },
+    "additionalProperties": false,
+    "properties": {
+      "request_id": {
+        "pattern": "^[a-zA-Z0-9_-]{8,80}$",
+        "title": "Request Id",
+        "type": "string"
+      },
+      "source": {
+        "default": "native",
+        "enum": [
+          "native",
+          "taobao",
+          "douyin"
+        ],
+        "title": "Source",
+        "type": "string"
+      },
+      "status": {
+        "enum": [
+          "awaiting_shipment",
+          "shipped",
+          "delivered",
+          "closed"
+        ],
+        "title": "Status",
+        "type": "string"
+      },
+      "external_id": {
+        "maxLength": 100,
+        "minLength": 1,
+        "title": "External Id",
+        "type": "string"
+      },
+      "payment_reference": {
+        "maxLength": 150,
+        "minLength": 1,
+        "title": "Payment Reference",
+        "type": "string"
+      },
+      "paid_cents": {
+        "maximum": 100000000,
+        "minimum": 1,
+        "title": "Paid Cents",
+        "type": "integer"
+      },
+      "items": {
+        "items": {
+          "$ref": "#/$defs/Line"
+        },
+        "maxItems": 100,
+        "minItems": 1,
+        "title": "Items",
+        "type": "array"
+      }
+    },
+    "required": [
+      "request_id",
+      "status",
+      "external_id",
+      "payment_reference",
+      "paid_cents",
+      "items"
+    ],
+    "title": "OrderInput",
+    "type": "object"
+  },
+  "Shipment": {
+    "additionalProperties": false,
+    "properties": {
+      "status": {
+        "enum": [
+          "awaiting_shipment",
+          "shipped",
+          "delivered",
+          "closed"
+        ],
+        "title": "Status",
+        "type": "string"
+      },
+      "carrier": {
+        "default": "",
+        "maxLength": 80,
+        "title": "Carrier",
+        "type": "string"
+      },
+      "tracking_number": {
+        "default": "",
+        "maxLength": 100,
+        "title": "Tracking Number",
+        "type": "string"
+      },
+      "event": {
+        "maxLength": 280,
+        "minLength": 1,
+        "title": "Event",
+        "type": "string"
+      }
+    },
+    "required": [
+      "status",
+      "event"
+    ],
+    "title": "Shipment",
+    "type": "object"
+  },
+  "RefundInput": {
+    "additionalProperties": false,
+    "properties": {
+      "request_id": {
+        "pattern": "^[a-zA-Z0-9_-]{8,80}$",
+        "title": "Request Id",
+        "type": "string"
+      },
+      "amount_cents": {
+        "maximum": 100000000,
+        "minimum": 1,
+        "title": "Amount Cents",
+        "type": "integer"
+      },
+      "reason": {
+        "maxLength": 500,
+        "minLength": 1,
+        "title": "Reason",
+        "type": "string"
+      }
+    },
+    "required": [
+      "request_id",
+      "amount_cents",
+      "reason"
+    ],
+    "title": "RefundInput",
+    "type": "object"
+  },
+  "RefundReceipt": {
+    "additionalProperties": false,
+    "properties": {
+      "refund_id": {
+        "title": "Refund Id",
+        "type": "string"
+      },
+      "amount_cents": {
+        "minimum": 1,
+        "title": "Amount Cents",
+        "type": "integer"
+      },
+      "currency": {
+        "const": "CNY",
+        "title": "Currency",
+        "type": "string"
+      },
+      "status": {
+        "enum": [
+          "submitted",
+          "succeeded",
+          "failed"
+        ],
+        "title": "Status",
+        "type": "string"
+      },
+      "receipt": {
+        "maxLength": 200,
+        "minLength": 1,
+        "title": "Receipt",
+        "type": "string"
+      }
+    },
+    "required": [
+      "refund_id",
+      "amount_cents",
+      "currency",
+      "status",
+      "receipt"
+    ],
+    "title": "RefundReceipt",
+    "type": "object"
+  },
+  "OrderSnapshot": {
+    "additionalProperties": false,
+    "properties": {
+      "external_id": {
+        "title": "External Id",
+        "type": "string"
+      },
+      "status": {
+        "enum": [
+          "awaiting_shipment",
+          "shipped",
+          "delivered",
+          "closed"
+        ],
+        "title": "Status",
+        "type": "string"
+      },
+      "carrier": {
+        "default": "",
+        "maxLength": 80,
+        "title": "Carrier",
+        "type": "string"
+      },
+      "tracking_number": {
+        "default": "",
+        "maxLength": 100,
+        "title": "Tracking Number",
+        "type": "string"
+      },
+      "event": {
+        "maxLength": 280,
+        "minLength": 1,
+        "title": "Event",
+        "type": "string"
+      }
+    },
+    "required": [
+      "external_id",
+      "status",
+      "event"
+    ],
+    "title": "OrderSnapshot",
+    "type": "object"
+  }
+}

@@ -1,0 +1,402 @@
+"""Commerce records with transactional stock and a separate refund approval boundary."""
+
+import hashlib
+import json
+import os
+import secrets
+import time
+from typing import Literal
+from urllib.parse import quote, urlsplit
+
+import httpx
+from fastapi import HTTPException
+from pydantic import BaseModel, ConfigDict, Field
+
+Source = Literal["native", "taobao", "douyin"]
+State = Literal["awaiting_shipment", "shipped", "delivered", "closed"]
+
+
+class Input(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+
+class StockChange(Input):
+    sku: str = Field(pattern=r"^[a-zA-Z0-9_-]{1,60}$")
+    product_id: str = Field(min_length=1, max_length=60)
+    delta: int = Field(strict=True, ge=-1000000, le=1000000)
+    expected_version: int = Field(strict=True, ge=0)
+
+
+class Line(Input):
+    sku: str = Field(pattern=r"^[a-zA-Z0-9_-]{1,60}$")
+    name: str = Field(min_length=1, max_length=100)
+    quantity: int = Field(strict=True, ge=1, le=1000)
+    unit_cents: int = Field(strict=True, ge=0, le=100000000)
+
+
+class OrderInput(Input):
+    request_id: str = Field(pattern=r"^[a-zA-Z0-9_-]{8,80}$")
+    source: Source = "native"
+    status: State
+    external_id: str = Field(min_length=1, max_length=100)
+    payment_reference: str = Field(min_length=1, max_length=150)
+    paid_cents: int = Field(strict=True, ge=1, le=100000000)
+    items: list[Line] = Field(min_length=1, max_length=100)
+
+
+class Shipment(Input):
+    status: State
+    carrier: str = Field(default="", max_length=80)
+    tracking_number: str = Field(default="", max_length=100)
+    event: str = Field(min_length=1, max_length=280)
+
+
+class RefundInput(Input):
+    request_id: str = Field(pattern=r"^[a-zA-Z0-9_-]{8,80}$")
+    amount_cents: int = Field(strict=True, ge=1, le=100000000)
+    reason: str = Field(min_length=1, max_length=500)
+
+
+class RefundReceipt(Input):
+    refund_id: str
+    amount_cents: int = Field(strict=True, ge=1)
+    currency: Literal["CNY"]
+    status: Literal["submitted", "succeeded", "failed"]
+    receipt: str = Field(min_length=1, max_length=200)
+
+
+class OrderSnapshot(Input):
+    external_id: str
+    status: State
+    carrier: str = Field(default="", max_length=80)
+    tracking_number: str = Field(default="", max_length=100)
+    event: str = Field(min_length=1, max_length=280)
+
+
+class Commerce:
+    def __init__(self, store):
+        self.store = store
+        with store.db() as db:
+            db.executescript("""
+                CREATE TABLE IF NOT EXISTS commerce_stock (
+                    sku TEXT PRIMARY KEY, product_id TEXT, available INTEGER NOT NULL CHECK(available>=0),
+                    version INTEGER NOT NULL);
+                CREATE TABLE IF NOT EXISTS commerce_orders (
+                    id TEXT PRIMARY KEY, request_id TEXT UNIQUE, fingerprint TEXT, source TEXT, external_id TEXT,
+                    token_hash TEXT UNIQUE, payload TEXT, status TEXT, shipment TEXT, created REAL,
+                    UNIQUE(source,external_id));
+                CREATE TABLE IF NOT EXISTS commerce_refunds (
+                    id TEXT PRIMARY KEY, order_id TEXT, request_id TEXT, amount INTEGER CHECK(amount>0),
+                    reason TEXT, status TEXT, receipt TEXT, created REAL, UNIQUE(order_id,request_id));
+                CREATE TABLE IF NOT EXISTS commerce_shipment_events (
+                    id INTEGER PRIMARY KEY, order_id TEXT, payload TEXT, created REAL);
+                CREATE TABLE IF NOT EXISTS commerce_audit (
+                    id INTEGER PRIMARY KEY, action TEXT, entity TEXT, created REAL);
+            """)
+
+    @staticmethod
+    def audit(db, action, entity):
+        db.execute(
+            "INSERT INTO commerce_audit(action,entity,created) VALUES (?,?,?)", (action, entity, time.time())
+        )
+
+    def stock(self, product_id):
+        with self.store.db() as db:
+            return [
+                dict(r) for r in db.execute("SELECT * FROM commerce_stock WHERE product_id=?", (product_id,))
+            ]
+
+    def adjust_stock(self, body):
+        with self.store.db() as db:
+            db.execute("BEGIN IMMEDIATE")
+            row = db.execute("SELECT * FROM commerce_stock WHERE sku=?", (body.sku,)).fetchone()
+            version, available = (row["version"], row["available"]) if row else (0, 0)
+            if body.expected_version != version or (row and row["product_id"] != body.product_id):
+                raise HTTPException(409, "库存版本或商品映射冲突，请重新读取。")
+            if available + body.delta < 0:
+                raise HTTPException(409, "库存不能小于零。")
+            db.execute(
+                "INSERT OR REPLACE INTO commerce_stock VALUES (?,?,?,?)",
+                (body.sku, body.product_id, available + body.delta, version + 1),
+            )
+            self.audit(db, "stock_adjust", body.sku)
+        return self.stock(body.product_id)
+
+    def create_order(self, body):
+        if body.source == "native" and body.status != "awaiting_shipment":
+            raise HTTPException(422, "自建商城订单登记为待发货，发货请使用物流接口。")
+        payload = body.model_dump_json()
+        fingerprint = hashlib.sha256(payload.encode()).hexdigest()
+        with self.store.db() as db:
+            db.execute("BEGIN IMMEDIATE")
+            existing = db.execute(
+                "SELECT fingerprint FROM commerce_orders WHERE request_id=?", (body.request_id,)
+            ).fetchone()
+            if existing:
+                if existing["fingerprint"] != fingerprint:
+                    raise HTTPException(409, "幂等键已用于另一组订单数据。")
+                raise HTTPException(409, "该订单已导入；访问凭证不重复返回，请使用重发凭证接口。")
+            if db.execute(
+                "SELECT 1 FROM commerce_orders WHERE source=? AND external_id=?",
+                (body.source, body.external_id),
+            ).fetchone():
+                raise HTTPException(409, "平台订单已存在。")
+            if body.source == "native":
+                for item in body.items:
+                    result = db.execute(
+                        "UPDATE commerce_stock SET available=available-?,version=version+1 "
+                        "WHERE sku=? AND available>=?",
+                        (item.quantity, item.sku, item.quantity),
+                    )
+                    if result.rowcount != 1:
+                        raise HTTPException(409, "SKU不存在或可用库存不足；整个订单已撤销。")
+            order_id, token = secrets.token_hex(16), secrets.token_urlsafe(32)
+            db.execute(
+                "INSERT INTO commerce_orders VALUES (?,?,?,?,?,?,?,?,?,?)",
+                (
+                    order_id,
+                    body.request_id,
+                    fingerprint,
+                    body.source,
+                    body.external_id,
+                    self.store.digest(token),
+                    payload,
+                    body.status,
+                    "{}",
+                    time.time(),
+                ),
+            )
+            self.audit(db, "order_import", order_id)
+        return {"id": order_id, "access_token": token, "source": body.source}
+
+    def order(self, token):
+        with self.store.db() as db:
+            row = (
+                db.execute(
+                    "SELECT * FROM commerce_orders WHERE token_hash=?", (self.store.digest(token),)
+                ).fetchone()
+                if token
+                else None
+            )
+            if not row:
+                raise HTTPException(404, "未关联有效订单。")
+            return self.summary(db, row)
+
+    @staticmethod
+    def summary(db, row):
+        payload = json.loads(row["payload"])
+        refunds = [
+            dict(r)
+            for r in db.execute(
+                "SELECT id,amount AS amount_cents,status,receipt FROM commerce_refunds WHERE order_id=? ORDER BY created",
+                (row["id"],),
+            )
+        ]
+        return {
+            "id": row["id"],
+            "source": row["source"],
+            "status": row["status"],
+            "currency": "CNY",
+            "amount_cents": payload["paid_cents"],
+            "items": payload["items"],
+            "shipment": json.loads(row["shipment"]),
+            "refunds": refunds,
+            "created_at": row["created"],
+            "shipment_events": [
+                json.loads(r[0])
+                for r in db.execute(
+                    "SELECT payload FROM commerce_shipment_events WHERE order_id=? ORDER BY id DESC LIMIT 50",
+                    (row["id"],),
+                )
+            ][::-1],
+        }
+
+    def rotate(self, order_id):
+        token = secrets.token_urlsafe(32)
+        with self.store.db() as db:
+            if (
+                db.execute(
+                    "UPDATE commerce_orders SET token_hash=? WHERE id=?", (self.store.digest(token), order_id)
+                ).rowcount
+                != 1
+            ):
+                raise HTTPException(404, "订单不存在。")
+            self.audit(db, "access_rotate", order_id)
+        return {"access_token": token}
+
+    def shipment(self, order_id, body, remote=False):
+        with self.store.db() as db:
+            row = db.execute("SELECT * FROM commerce_orders WHERE id=?", (order_id,)).fetchone()
+            if not row:
+                raise HTTPException(404, "订单不存在。")
+            if row["source"] != "native" and not remote:
+                raise HTTPException(409, "平台订单请通过授权网关刷新，不能手工冒充平台物流。")
+            if body.status in {"shipped", "delivered"} and (not body.carrier or not body.tracking_number):
+                raise HTTPException(422, "发货或签收状态必须有承运商及运单号。")
+            ranks = {"awaiting_shipment": 0, "shipped": 1, "delivered": 2, "closed": 3}
+            if ranks[body.status] < ranks[row["status"]]:
+                raise HTTPException(409, "订单状态不能倒退。")
+            data = body.model_dump() | {"updated_at": time.time(), "platform_verified": remote}
+            db.execute(
+                "UPDATE commerce_orders SET status=?,shipment=? WHERE id=?",
+                (body.status, json.dumps(data, ensure_ascii=False), order_id),
+            )
+            previous = json.loads(row["shipment"])
+            if any(previous.get(k) != v for k, v in body.model_dump().items()):
+                db.execute(
+                    "INSERT INTO commerce_shipment_events(order_id,payload,created) VALUES (?,?,?)",
+                    (order_id, json.dumps(data, ensure_ascii=False), time.time()),
+                )
+            self.audit(db, "shipment_refresh" if remote else "shipment_update", order_id)
+        return data
+
+    def request_refund(self, token, body):
+        order = self.order(token)
+        with self.store.db() as db:
+            db.execute("BEGIN IMMEDIATE")
+            old = db.execute(
+                "SELECT * FROM commerce_refunds WHERE order_id=? AND request_id=?",
+                (order["id"], body.request_id),
+            ).fetchone()
+            if old:
+                if old["amount"] != body.amount_cents or old["reason"] != body.reason:
+                    raise HTTPException(409, "退款幂等键冲突。")
+                return {"id": old["id"], "status": old["status"]}
+            reserved = db.execute(
+                "SELECT COALESCE(SUM(amount),0) FROM commerce_refunds WHERE order_id=? "
+                "AND status NOT IN ('failed','rejected')",
+                (order["id"],),
+            ).fetchone()[0]
+            if reserved + body.amount_cents > order["amount_cents"]:
+                raise HTTPException(409, "退款金额超过剩余可申请金额。")
+            refund_id = secrets.token_hex(16)
+            db.execute(
+                "INSERT INTO commerce_refunds VALUES (?,?,?,?,?,?,?,?)",
+                (
+                    refund_id,
+                    order["id"],
+                    body.request_id,
+                    body.amount_cents,
+                    body.reason,
+                    "requested",
+                    "",
+                    time.time(),
+                ),
+            )
+            self.audit(db, "refund_request", refund_id)
+        return {"id": refund_id, "status": "requested"}
+
+    def decide(self, refund_id, approved):
+        with self.store.db() as db:
+            status = "approved" if approved else "rejected"
+            if (
+                db.execute(
+                    "UPDATE commerce_refunds SET status=? WHERE id=? AND status='requested'",
+                    (status, refund_id),
+                ).rowcount
+                != 1
+            ):
+                raise HTTPException(409, "仅待审核退款可以审批。")
+            self.audit(db, "refund_" + status, refund_id)
+        return {"id": refund_id, "status": status}
+
+    async def gateway(self, source, method, path, body=None, key=None):
+        base = os.getenv(f"WANG_{source.upper()}_GATEWAY_URL", "")
+        token = os.getenv(f"WANG_{source.upper()}_GATEWAY_TOKEN", "")
+        parsed = urlsplit(base)
+        if (
+            parsed.scheme != "https"
+            or not parsed.netloc
+            or parsed.username
+            or parsed.query
+            or parsed.fragment
+            or not token
+        ):
+            raise HTTPException(503, "尚未配置该渠道的HTTPS商家网关及授权凭证。")
+        headers = {"Authorization": "Bearer " + token}
+        if key:
+            headers["Idempotency-Key"] = key
+        try:
+            async with httpx.AsyncClient(timeout=20, follow_redirects=False) as client:
+                response = await client.request(method, base.rstrip("/") + path, headers=headers, json=body)
+                response.raise_for_status()
+                return response.json()
+        except (httpx.HTTPError, ValueError):
+            raise HTTPException(502, "商家网关暂不可用，写入结果需查询核验。") from None
+
+    async def refresh(self, token):
+        current = self.order(token)
+        if current["source"] == "native":
+            return current
+        with self.store.db() as db:
+            row = db.execute(
+                "SELECT external_id FROM commerce_orders WHERE id=?", (current["id"],)
+            ).fetchone()
+        data = await self.gateway(current["source"], "GET", "/orders/" + quote(row["external_id"], safe=""))
+        try:
+            snapshot = OrderSnapshot.model_validate(data)
+            if snapshot.external_id != row["external_id"]:
+                raise ValueError("order mismatch")
+        except ValueError:
+            raise HTTPException(502, "平台订单响应校验失败。") from None
+        self.shipment(current["id"], Shipment(**snapshot.model_dump(exclude={"external_id"})), remote=True)
+        return self.order(token)
+
+    async def execute(self, refund_id, reconcile=False):
+        with self.store.db() as db:
+            db.execute("BEGIN IMMEDIATE")
+            row = db.execute(
+                "SELECT r.*,o.source,o.external_id,o.payload FROM commerce_refunds r "
+                "JOIN commerce_orders o ON o.id=r.order_id WHERE r.id=?",
+                (refund_id,),
+            ).fetchone()
+            if not row:
+                raise HTTPException(404, "退款不存在。")
+            allowed = {"uncertain", "submitted", "executing"} if reconcile else {"approved"}
+            if row["status"] not in allowed:
+                raise HTTPException(409, "退款当前状态不允许该操作。")
+            if not reconcile:
+                db.execute("UPDATE commerce_refunds SET status='executing' WHERE id=?", (refund_id,))
+                self.audit(db, "refund_execute", refund_id)
+        try:
+            if reconcile:
+                data = await self.gateway(row["source"], "GET", "/refunds/" + refund_id)
+            else:
+                data = await self.gateway(
+                    row["source"],
+                    "POST",
+                    "/refunds",
+                    {
+                        "refund_id": refund_id,
+                        "external_order_id": row["external_id"],
+                        "payment_reference": json.loads(row["payload"])["payment_reference"],
+                        "amount_cents": row["amount"],
+                        "currency": "CNY",
+                    },
+                    key=refund_id,
+                )
+            receipt = RefundReceipt.model_validate(data)
+            if receipt.refund_id != refund_id or receipt.amount_cents != row["amount"]:
+                raise ValueError("refund mismatch")
+        except (HTTPException, ValueError) as exc:
+            with self.store.db() as db:
+                # Missing configuration is known to have made no network request.
+                status = (
+                    "approved"
+                    if not reconcile and isinstance(exc, HTTPException) and exc.status_code == 503
+                    else "uncertain"
+                )
+                db.execute(
+                    "UPDATE commerce_refunds SET status=? WHERE id=? AND status='executing'",
+                    (status, refund_id),
+                )
+            raise HTTPException(502, "未确认退款成功；请检查渠道配置并查询核验，不能假定已到账。") from None
+        with self.store.db() as db:
+            changed = db.execute(
+                "UPDATE commerce_refunds SET status=?,receipt=? WHERE id=? AND status IN ('executing','uncertain','submitted')",
+                (receipt.status, receipt.receipt, refund_id),
+            )
+            if changed.rowcount != 1:
+                raise HTTPException(409, "退款状态已被其他操作更新，请读取订单核验。")
+            self.audit(db, "refund_" + receipt.status, refund_id)
+        return receipt.model_dump()

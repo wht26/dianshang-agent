@@ -1,4 +1,4 @@
-"""Local Q&A-only service; no account or commerce endpoints."""
+"""Local customer support and authenticated commerce service."""
 
 import asyncio
 import os
@@ -15,6 +15,8 @@ from .knowledge import Knowledge
 from .store import Store
 from .shop import Shop, ShopConfig
 from .memory import Memory, MemoryFile, Preferences
+from .commerce import Commerce
+from .commerce_api import routes, support_context
 
 
 def create_app(db_path=None, knowledge_dir=None, shop_path=None):
@@ -27,11 +29,14 @@ def create_app(db_path=None, knowledge_dir=None, shop_path=None):
     if saved_shop and not shop_path and not os.getenv("WANG_SHOP_FILE"):
         import json
         shop = Shop(data=json.loads(saved_shop[0]))
+    commerce = Commerce(store)
     agent = Agent(knowledge, shop)
     memory = Memory(store)
     lock = asyncio.Lock()
-    app = FastAPI(title="wang · 服装鞋包客服 Agent", version="0.8.0")
+    app = FastAPI(title="wang · 服装鞋包客服 Agent", version="0.9.0", docs_url=None, redoc_url=None)
     app.state.agent, app.state.store = agent, store
+    app.state.commerce = commerce
+    app.include_router(routes(commerce))
     app.add_middleware(TrustedHostMiddleware, allowed_hosts=["localhost", "127.0.0.1", "testserver"])
 
     @app.middleware("http")
@@ -92,7 +97,7 @@ def create_app(db_path=None, knowledge_dir=None, shop_path=None):
     def bootstrap(request: Request, response: Response):
         token = session(request, response)
         owner(request, response)
-        return {"name": "wang", "version": "0.8.0", "mode": agent.mode,
+        return {"name": "wang", "version": "0.9.0", "mode": agent.mode,
                 "model": os.getenv("DEEPSEEK_MODEL", "deepseek-flash") if agent.mode == "deepseek" else None,
                 "documents": agent.knowledge.documents, "history": store.history(token), "live_web": False,
                 "shop": {"name": shop.config.name, "is_demo": shop.config.is_demo}, "products": shop.catalog()}
@@ -170,7 +175,8 @@ def create_app(db_path=None, knowledge_dir=None, shop_path=None):
         async with lock:
             try:
                 preferences = memory.read(owner(request, response))
-                result = await agent.answer(question, store.history(token), body.product_id, preferences)
+                business = support_context(commerce, request.cookies.get("wang_order"), body.product_id)
+                result = await agent.answer(question, store.history(token), body.product_id, preferences, business)
             except ValueError as exc:
                 raise HTTPException(422, str(exc)) from None
             except ProviderError as exc:
@@ -180,6 +186,10 @@ def create_app(db_path=None, knowledge_dir=None, shop_path=None):
 
     static = Path(__file__).parent / "static"
     app.mount("/static", StaticFiles(directory=static), name="static")
+
+    @app.get("/docs", include_in_schema=False)
+    def api_docs():
+        return FileResponse(static / "api.html")
 
     @app.get("/")
     def index():
