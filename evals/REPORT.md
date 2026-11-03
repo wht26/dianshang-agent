@@ -41,3 +41,13 @@ Claude Code独立审查也因本机401认证失败，未获得审查结果；本
 Claude Code计划请求仍因401认证失败，未获得独立规划或审查输入；此次由本地代码复核、自动化测试和浏览器验证完成检查。
 
 CI补丁：复现GitHub Actions的WANG_MODE=demo后，模型上下文测试因未显式切换模式而进入本地分支，模拟模型未被调用。测试现明确设置WANG_MODE=auto，并断言模拟请求只调用一次；CI默认离线模式保持不变。在WANG_MODE=demo条件下全量52项测试及ruff通过。
+
+# v0.10 PostgreSQL + Redis验证
+
+日期：2026-11-03。代码提交11247b1的GitHub Actions在Python 3.11与3.13均通过全部60项pytest及ruff；依赖为真实PostgreSQL 17和Redis 7服务。验证记录：https://github.com/wht26/dianshang-agent/actions/runs/41578269805 。
+
+原52项测试全部迁移到真实PostgreSQL测试schema；新增8项验证连接间持久化、跨实例Redis租约互斥与所有权保护、跨实例限流与TTL、Redis故障拒绝降级、错误限流配置、跨应用知识刷新与健康检查、旧SQLite只读迁移及序列修复、迁移失败全量回滚。外部模型和商家网关仍使用测试响应，没有验证真实平台授权或资金退款。
+
+本机通过Python编译、JavaScript语法、ruff、wheel构建和Docker Compose配置校验；Windows配置脚本实际执行成功，生成用户级存储凭证，不创建凭证文件。未在本机通过数据库集成测试：Docker Desktop的docker-desktop WSL发行版缺少main/ext4.vhdx，数据库容器无法启动。未重置Docker/WSL，未改动旧SQLite数据，未把顾客数据发送到CI；本机原8000端口进程仍为旧版，尚未切换新版服务。真实数据迁移需恢复依赖后按docs/STORAGE.md执行。
+
+Claude Code计划请求受本机401认证问题限制，未获得有效计划与独立审查；由代码自检、真实服务CI和部署配置检查验证。60项工程测试不代表客服问答准确率认证。
