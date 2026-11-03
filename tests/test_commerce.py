@@ -393,6 +393,7 @@ def test_order_business_context_reaches_model_without_credentials(client, monkey
     from unittest.mock import AsyncMock, MagicMock
 
     monkeypatch.setenv("DEEPSEEK_API_KEY", "test-only")
+    monkeypatch.setenv("WANG_MODE", "auto")
     stock(client)
     record = create(client)
     response = MagicMock(status_code=200)
@@ -406,6 +407,7 @@ def test_order_business_context_reaches_model_without_credentials(client, monkey
         "/api/chat", headers=HEAD, json={"message": "我的订单发货了吗", "product_id": "tee-001"}
     )
     assert answer.status_code == 200
+    fake.post.assert_awaited_once()
     payload = fake.post.call_args.kwargs["json"]
     text = json.dumps(payload, ensure_ascii=False)
     assert "business_context" in text and "awaiting_shipment" in text and "5000" in text
