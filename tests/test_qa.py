@@ -97,7 +97,7 @@ def test_http_no_login_memory_isolation_and_new_chat(tmp_path, monkeypatch):
         assert first.cookies.get("wang_support") != token
         assert first.get("/api/bootstrap").json()["history"] == []
         with app.state.store.db() as db:
-            assert db.execute("SELECT COUNT(*) FROM qa_turns").fetchone()[0] == 1
+            assert db.execute("SELECT COUNT(*) FROM qa_turns").fetchone()["count"] == 1
             assert token not in str(db.execute("SELECT * FROM qa_sessions").fetchall())
         for path in ["/api/orders", "/api/returns", "/api/auth/status", "/api/staff/dashboard"]:
             assert first.get(path).status_code == 404

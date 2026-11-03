@@ -1,6 +1,6 @@
 """Local customer support and authenticated commerce service."""
 
-import asyncio
+from contextlib import asynccontextmanager
 import os
 from pathlib import Path
 
@@ -13,6 +13,7 @@ from starlette.middleware.trustedhost import TrustedHostMiddleware
 from .agent import Agent, ProviderError
 from .knowledge import Knowledge
 from .store import Store
+from .coordination import RedisControl
 from .shop import Shop, ShopConfig
 from .memory import Memory, MemoryFile, Preferences
 from .commerce import Commerce
@@ -20,23 +21,44 @@ from .commerce_api import routes, support_context
 
 
 def create_app(db_path=None, knowledge_dir=None, shop_path=None):
-    store = Store(db_path or os.getenv("WANG_QA_DB", "data/wang-support.db"))
-    knowledge = Knowledge(knowledge_dir or os.getenv("WANG_KNOWLEDGE_DIR"), store.path)
+    store = Store(db_path or os.getenv("DATABASE_URL"))
+    knowledge = Knowledge(knowledge_dir or os.getenv("WANG_KNOWLEDGE_DIR"), store.dsn)
     shop = Shop(shop_path or os.getenv("WANG_SHOP_FILE"))
+    store.initialize("CREATE TABLE IF NOT EXISTS shop_settings (id INTEGER PRIMARY KEY, payload TEXT)")
     with store.db() as db:
-        db.execute("CREATE TABLE IF NOT EXISTS shop_settings (id INTEGER PRIMARY KEY, payload TEXT)")
         saved_shop = db.execute("SELECT payload FROM shop_settings WHERE id=1").fetchone()
     if saved_shop and not shop_path and not os.getenv("WANG_SHOP_FILE"):
         import json
-        shop = Shop(data=json.loads(saved_shop[0]))
+        shop = Shop(data=json.loads(saved_shop["payload"]))
     commerce = Commerce(store)
     agent = Agent(knowledge, shop)
     memory = Memory(store)
-    lock = asyncio.Lock()
-    app = FastAPI(title="wang · 服装鞋包客服 Agent", version="0.9.0", docs_url=None, redoc_url=None)
+    control = RedisControl()
+
+    @asynccontextmanager
+    async def lifespan(app):
+        try:
+            yield
+        finally:
+            control.close()
+
+    app = FastAPI(title="wang · 服装鞋包客服 Agent", version="0.10.0", docs_url=None, redoc_url=None, lifespan=lifespan)
     app.state.agent, app.state.store = agent, store
     app.state.commerce = commerce
+    app.state.control = control
     app.include_router(routes(commerce))
+
+    def refresh_runtime():
+        nonlocal shop
+        if not shop_path and not os.getenv("WANG_SHOP_FILE"):
+            with store.db() as db:
+                row = db.execute("SELECT payload FROM shop_settings WHERE id=1").fetchone()
+            if row:
+                import json
+                shop = Shop(data=json.loads(row["payload"]))
+                agent.shop = shop
+        agent.knowledge = Knowledge(knowledge.extra_dir, store.dsn)
+
     app.add_middleware(TrustedHostMiddleware, allowed_hosts=["localhost", "127.0.0.1", "testserver"])
 
     @app.middleware("http")
@@ -93,11 +115,22 @@ def create_app(db_path=None, knowledge_dir=None, shop_path=None):
         memory.clear(owner(request, response))
         return {"preferences": Preferences().model_dump()}
 
+    @app.get("/health")
+    async def health():
+        try:
+            with store.db() as db:
+                db.execute("SELECT 1")
+            await control.call(control.client.ping)
+        except Exception:
+            raise HTTPException(503, "PostgreSQL或Redis服务尚未就绪。") from None
+        return {"status": "ok", "database": "postgresql", "coordination": "redis"}
+
     @app.get("/api/bootstrap")
     def bootstrap(request: Request, response: Response):
+        refresh_runtime()
         token = session(request, response)
         owner(request, response)
-        return {"name": "wang", "version": "0.9.0", "mode": agent.mode,
+        return {"name": "wang", "version": "0.10.0", "mode": agent.mode,
                 "model": os.getenv("DEEPSEEK_MODEL", "deepseek-flash") if agent.mode == "deepseek" else None,
                 "documents": agent.knowledge.documents, "history": store.history(token), "live_web": False,
                 "shop": {"name": shop.config.name, "is_demo": shop.config.is_demo}, "products": shop.catalog()}
@@ -105,7 +138,7 @@ def create_app(db_path=None, knowledge_dir=None, shop_path=None):
     @app.post("/api/shop/import")
     async def import_shop(body: ShopConfig):
         nonlocal shop
-        if lock.locked():
+        if await control.busy():
             raise HTTPException(429, "请等待当前回答完成。")
         if shop_path or os.getenv("WANG_SHOP_FILE"):
             raise HTTPException(409, "当前使用外部店铺文件，请更新该文件并重启，或取消文件配置后在此导入。")
@@ -114,14 +147,14 @@ def create_app(db_path=None, knowledge_dir=None, shop_path=None):
         except ValueError as exc:
             raise HTTPException(422, str(exc)) from None
         with store.db() as db:
-            db.execute("INSERT OR REPLACE INTO shop_settings VALUES (1,?)", (body.model_dump_json(),))
+            db.execute("INSERT INTO shop_settings VALUES (1,%s) ON CONFLICT (id) DO UPDATE SET payload=EXCLUDED.payload", (body.model_dump_json(),))
         shop = replacement
         agent.shop = replacement
         return {"name": shop.config.name, "products": shop.catalog()}
 
     @app.post("/api/conversations/new")
     async def new_conversation(response: Response):
-        if lock.locked():
+        if await control.busy():
             raise HTTPException(429, "请等待当前回答完成后再开启新对话。")
         token = store.session(None)
         response.set_cookie("wang_support", token, httponly=True, samesite="strict", max_age=30 * 86400)
@@ -138,28 +171,29 @@ def create_app(db_path=None, knowledge_dir=None, shop_path=None):
 
     @app.get("/api/knowledge")
     def documents():
+        refresh_runtime()
         return {"documents": agent.knowledge.documents, "chunks": len(agent.knowledge.chunks)}
 
     @app.post("/api/knowledge/import")
     async def import_document(body: DocumentInput):
-        if lock.locked():
+        if await control.busy():
             raise HTTPException(429, "请等待回答完成后再更新知识库。")
         if body.product_id and body.product_id not in shop.products:
             raise HTTPException(422, "请选择有效商品。")
         try:
             doc_id = agent.knowledge.import_document(body.title, body.content, body.product_id)
-            agent.knowledge = Knowledge(knowledge.extra_dir, store.path)
+            agent.knowledge = Knowledge(knowledge.extra_dir, store.dsn)
         except ValueError as exc:
             raise HTTPException(422, str(exc)) from None
         return {"id": doc_id, "documents": agent.knowledge.documents}
 
     @app.post("/api/knowledge/{doc_id}/remove")
     async def remove_document(doc_id: str):
-        if lock.locked():
+        if await control.busy():
             raise HTTPException(429, "请等待回答完成后再更新知识库。")
         try:
             agent.knowledge.remove_document(doc_id)
-            agent.knowledge = Knowledge(knowledge.extra_dir, store.path)
+            agent.knowledge = Knowledge(knowledge.extra_dir, store.dsn)
         except ValueError as exc:
             raise HTTPException(422, str(exc)) from None
         return {"documents": agent.knowledge.documents}
@@ -169,11 +203,14 @@ def create_app(db_path=None, knowledge_dir=None, shop_path=None):
         question = body.message.strip()
         if not question:
             raise HTTPException(422, "请输入问题。")
-        if lock.locked():
+        if await control.busy():
             raise HTTPException(429, "正在生成回答，请稍后重试。")
+        identity = store.digest(request.client.host if request.client else "unknown")
+        await control.allow(identity)
         token = session(request, response)
-        async with lock:
+        async with control.hold() as lease:
             try:
+                refresh_runtime()
                 preferences = memory.read(owner(request, response))
                 business = support_context(commerce, request.cookies.get("wang_order"), body.product_id)
                 result = await agent.answer(question, store.history(token), body.product_id, preferences, business)
@@ -181,6 +218,7 @@ def create_app(db_path=None, knowledge_dir=None, shop_path=None):
                 raise HTTPException(422, str(exc)) from None
             except ProviderError as exc:
                 raise HTTPException(502, str(exc)) from None
+            await lease.ensure_owned()
             store.append(token, question, result)
         return result
 
@@ -197,5 +235,3 @@ def create_app(db_path=None, knowledge_dir=None, shop_path=None):
 
     return app
 
-
-app = create_app()

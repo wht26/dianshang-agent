@@ -135,7 +135,7 @@ def routes(commerce):
             raise HTTPException(422, "SKU格式不正确。")
         if source == "native":
             with commerce.store.db() as db:
-                row = db.execute("SELECT * FROM commerce_stock WHERE sku=?", (sku,)).fetchone()
+                row = db.execute("SELECT * FROM commerce_stock WHERE sku=%s", (sku,)).fetchone()
                 if not row:
                     raise HTTPException(404, "SKU未录入。")
                 return dict(row) | {"source": source}

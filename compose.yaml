@@ -1,9 +1,39 @@
 services:
+  postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_DB: wang
+      POSTGRES_USER: wang
+      POSTGRES_PASSWORD: ${WANG_POSTGRES_PASSWORD:?Run setup-storage.ps1 first}
+    ports: ['127.0.0.1:15432:5432']
+    volumes: ['postgres-data:/var/lib/postgresql/data']
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U wang -d wang']
+      interval: 5s
+      timeout: 5s
+      retries: 12
+  redis:
+    image: redis:7-alpine
+    command: ['redis-server', '--appendonly', 'yes', '--requirepass', '${WANG_REDIS_PASSWORD:?Run setup-storage.ps1 first}']
+    environment:
+      REDISCLI_AUTH: ${WANG_REDIS_PASSWORD:?Run setup-storage.ps1 first}
+    ports: ['127.0.0.1:16379:6379']
+    volumes: ['redis-data:/data']
+    healthcheck:
+      test: ['CMD', 'redis-cli', 'ping']
+      interval: 5s
+      timeout: 5s
+      retries: 12
   wang:
     build: .
-    ports:
-      - '127.0.0.1:8000:8000'
+    ports: ['127.0.0.1:8000:8000']
+    depends_on:
+      postgres: {condition: service_healthy}
+      redis: {condition: service_healthy}
     environment:
+      DATABASE_URL: postgresql://wang:${WANG_POSTGRES_PASSWORD:?Run setup-storage.ps1 first}@postgres:5432/wang
+      REDIS_URL: redis://:${WANG_REDIS_PASSWORD:?Run setup-storage.ps1 first}@redis:6379/0
+      WANG_REDIS_PREFIX: wang
       DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY:-}
       DEEPSEEK_MODEL: ${DEEPSEEK_MODEL:-deepseek-flash}
       DEEPSEEK_BASE_URL: ${DEEPSEEK_BASE_URL:-https://api.deepseek.com}
@@ -15,7 +45,6 @@ services:
       WANG_TAOBAO_GATEWAY_TOKEN: ${WANG_TAOBAO_GATEWAY_TOKEN:-}
       WANG_DOUYIN_GATEWAY_URL: ${WANG_DOUYIN_GATEWAY_URL:-}
       WANG_DOUYIN_GATEWAY_TOKEN: ${WANG_DOUYIN_GATEWAY_TOKEN:-}
-    volumes:
-      - wang-data:/app/data
 volumes:
-  wang-data:
+  postgres-data:
+  redis-data:

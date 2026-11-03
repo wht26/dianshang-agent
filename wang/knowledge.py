@@ -1,7 +1,7 @@
 """Small, inspectable local Markdown retrieval; no network or business writes."""
 
 import hashlib
-import sqlite3
+from .database import Database
 import time
 import math
 import re
@@ -29,7 +29,8 @@ def terms(text):
 class Knowledge:
     def __init__(self, extra_dir=None, db_path=None):
         self.extra_dir = extra_dir
-        self.db_path = str(db_path) if db_path else None
+        self.database = Database(db_path) if db_path else None
+        self.db_path = self.database.dsn if self.database else None
         self.chunks = []
         self.documents = []
         directories = [Path(__file__).parent / "knowledge"]
@@ -57,10 +58,11 @@ class Knowledge:
                         self.chunks.append({"id": doc_id, "title": title, "content": content,
                                             "terms": terms(title + " " + content)})
         if self.db_path:
-            with sqlite3.connect(self.db_path) as db:
-                db.execute("CREATE TABLE IF NOT EXISTS kb_documents (id TEXT PRIMARY KEY, title TEXT, content TEXT, product_id TEXT, created REAL)")
+            self.database.initialize("CREATE TABLE IF NOT EXISTS kb_documents (id TEXT PRIMARY KEY, title TEXT, content TEXT, product_id TEXT, created DOUBLE PRECISION)")
+            with self.database.db() as db:
                 rows = db.execute("SELECT id,title,content,product_id FROM kb_documents ORDER BY created,id").fetchall()
-            for doc_id, title, text, product_id in rows:
+            for row in rows:
+                doc_id, title, text, product_id = (row[k] for k in ("id", "title", "content", "product_id"))
                 self.documents.append({"id": doc_id, "title": title, "file": title,
                                        "product_id": product_id, "imported": True})
                 for offset in range(0, len(text), 700):
@@ -78,19 +80,19 @@ class Knowledge:
         if not title or len(title) > 120 or not content or len(content) > 100_000 or "\x00" in content:
             raise ValueError("资料标题1～120字，正文1～100000字，不能含空字符。")
         doc_id = "K" + hashlib.sha256((product_id + "\0" + title + "\0" + content).encode()).hexdigest()[:16]
-        with sqlite3.connect(self.db_path) as db:
-            db.execute("BEGIN IMMEDIATE")
-            if not db.execute("SELECT 1 FROM kb_documents WHERE id=?", (doc_id,)).fetchone():
-                if db.execute("SELECT COUNT(*) FROM kb_documents").fetchone()[0] >= 100:
+        with self.database.db() as db:
+            db.execute("SELECT pg_advisory_xact_lock(79214002)")
+            if not db.execute("SELECT 1 FROM kb_documents WHERE id=%s", (doc_id,)).fetchone():
+                if db.execute("SELECT COUNT(*) FROM kb_documents").fetchone()["count"] >= 100:
                     raise ValueError("最多导入100份资料，请先移除旧资料。")
-                db.execute("INSERT INTO kb_documents VALUES (?,?,?,?,?)", (doc_id, title, content, product_id, time.time()))
+                db.execute("INSERT INTO kb_documents VALUES (%s,%s,%s,%s,%s)", (doc_id, title, content, product_id, time.time()))
         return doc_id
 
     def remove_document(self, doc_id):
         if not self.db_path:
             raise ValueError("知识库持久化未配置。")
-        with sqlite3.connect(self.db_path) as db:
-            cursor = db.execute("DELETE FROM kb_documents WHERE id=?", (doc_id,))
+        with self.database.db() as db:
+            cursor = db.execute("DELETE FROM kb_documents WHERE id=%s", (doc_id,))
             if not cursor.rowcount:
                 raise ValueError("导入资料不存在；内置资料不能在这里移除。")
 
