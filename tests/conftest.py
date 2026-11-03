@@ -6,7 +6,7 @@ Legacy tmp_path arguments are logical test namespace names, never SQLite files.
 import os
 import uuid
 from pathlib import Path
-from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
+from urllib.parse import parse_qsl, quote, urlencode, urlsplit, urlunsplit
 
 import psycopg
 import pytest
@@ -37,7 +37,7 @@ def isolated_services(monkeypatch):
             parts = urlsplit(base)
             query = dict(parse_qsl(parts.query))
             query['options'] = '-c search_path=' + schema
-            namespaces[key] = (schema, urlunsplit(parts._replace(query=urlencode(query))))
+            namespaces[key] = (schema, urlunsplit(parts._replace(query=urlencode(query, quote_via=quote))))
         return namespaces[key][1]
 
     def initialize(instance, dsn=None):

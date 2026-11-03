@@ -51,3 +51,11 @@ CI补丁：复现GitHub Actions的WANG_MODE=demo后，模型上下文测试因�
 本机通过Python编译、JavaScript语法、ruff、wheel构建和Docker Compose配置校验；Windows配置脚本实际执行成功，生成用户级存储凭证，不创建凭证文件。未在本机通过数据库集成测试：Docker Desktop的docker-desktop WSL发行版缺少main/ext4.vhdx，数据库容器无法启动。未重置Docker/WSL，未改动旧SQLite数据，未把顾客数据发送到CI；本机原8000端口进程仍为旧版，尚未切换新版服务。真实数据迁移需恢复依赖后按docs/STORAGE.md执行。
 
 Claude Code计划请求受本机401认证问题限制，未获得有效计划与独立审查；由代码自检、真实服务CI和部署配置检查验证。60项工程测试不代表客服问答准确率认证。
+
+## v0.10 本机切换完成
+
+2026-11-03后续验证：Docker磁盘可用后，启动被残留dockerInference通信文件阻塞。停止状态下保留并重命名仅含通信文件的Docker/run目录后重新启动成功；没有重置WSL或删除数据卷。启动本机PostgreSQL 17、Redis 7，备份旧SQLite，导入9个会话、12条历史问答。停止原8000端口旧版进程后再次备份，并逐表逐条核对10张业务表的数据一致。
+
+新版v0.10.0已在127.0.0.1:8000实际运行，/health返回postgresql与redis，页面与bootstrap返回新版。DeepSeek真实洗护问答返回200，问答历史往返验证通过。此烟雾测试不代表所有回答正确率。
+
+本机Windows的libpq发现测试schema URL中使用加号编码空格会解析为+search_path；测试fixture改用百分号编码空格。修复后使用独立wang_test库和隔离Redis前缀，本机60项pytest全部通过（20.12秒），ruff通过。旧库、备份和运行日志均留在忽略目录data中，不提交凭证或顾客数据。
