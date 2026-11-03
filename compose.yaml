@@ -1,0 +1,14 @@
+services:
+  wang:
+    build: .
+    ports:
+      - '127.0.0.1:8000:8000'
+    environment:
+      DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY:-}
+      DEEPSEEK_MODEL: ${DEEPSEEK_MODEL:-deepseek-flash}
+      DEEPSEEK_BASE_URL: ${DEEPSEEK_BASE_URL:-https://api.deepseek.com}
+      WANG_MODE: ${WANG_MODE:-auto}
+    volumes:
+      - wang-data:/app/data
+volumes:
+  wang-data:

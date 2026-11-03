@@ -1,0 +1,15 @@
+.product-label{font-size:11px;color:#778781;margin-right:8px}select{max-width:calc(100% - 80px);font:12px "Segoe UI","Microsoft YaHei",sans-serif;color:#285e4c;background:#edf3ed;border:1px solid #dce6dd;border-radius:6px;padding:6px 9px;margin-bottom:10px}select:focus-visible{outline:3px solid #afcbb8}.welcome h1{font-size:32px}.welcome{margin-top:4px}.suggestions button{padding:12px}.suggestions{margin-top:16px}@media(max-width:600px){.welcome h1{font-size:27px}.suggestions button{padding:10px}select{font-size:11px}}
+
+.kb-panel{font-size:11px;margin-top:15px;max-height:40vh;overflow:auto}.kb-panel summary{cursor:pointer;font-weight:600}.kb-panel label{display:block;margin-top:8px}.kb-panel input{width:100%;font-size:10px}.kb-panel select{max-width:100%;width:100%}.kb-panel button{font-size:10px;padding:5px;margin:4px;background:#eaf1eb;border-radius:5px}#kb-status{color:#876139}#kb-documents>div{border-bottom:1px solid #e3e9e5;padding:5px 0}@media(max-width:600px){.kb-panel{position:absolute;z-index:3;top:65px;left:0;background:white;padding:10px;max-width:280px}.kb-panel:not([open]){padding:5px;font-size:10px}}
+
+/* The sidebar, not each disclosure, owns scrolling. Never shrink disclosure content. */
+aside{overflow-y:auto;overflow-x:hidden;overscroll-behavior:contain;scrollbar-gutter:stable}
+aside>*{flex-shrink:0}.kb-panel{max-height:none;overflow:visible;min-height:auto}
+.kb-panel input{min-width:0;max-width:100%;padding:7px;border:1px solid #dce6dd;border-radius:5px}
+.kb-panel button{white-space:normal}.sidebar-footer{margin-top:24px}
+@media(max-width:600px){
+ aside{position:relative;display:flex;flex-direction:column;align-items:stretch;height:auto;max-height:42dvh;width:100%;padding:12px 18px;gap:8px}
+ aside .brand{align-self:flex-start}.sidebar-caption{display:block;margin:0}.new-chat{align-self:flex-end;margin-top:-44px}
+ .kb-panel,.kb-panel:not([open]){position:static;max-width:none;padding:0;margin:4px 0;z-index:auto}
+ .topic-label,.topics,.sidebar-footer{display:none}main{height:58dvh;min-height:350px}
+}

@@ -1,0 +1,81 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>wang · 服装鞋包客服</title>
+  <link rel="stylesheet" href="/static/style.css"><link rel="stylesheet" href="/static/support.css"><script src="/static/app.js" defer></script>
+</head>
+<body>
+  <aside>
+    <a class="brand" href="/" aria-label="wang 首页"><span class="logo">w</span> wang<span class="dot">.</span></a>
+    <span class="sidebar-caption">服装鞋包 · 买家客服 Agent</span>
+    <button id="new-chat" class="new-chat">＋ 开启新对话</button>
+    <details class="kb-panel" id="memory-panel">
+      <summary>我的记忆</summary>
+      <p>只保存你主动填写的偏好，新对话可继续使用。请勿填写隐私或订单信息。</p>
+      <form id="memory-form">
+        <label>版型偏好<input name="fit" maxlength="100" placeholder="例如：喜欢宽松"></label>
+        <label>颜色偏好<input name="colors" maxlength="100"></label>
+        <label>材质偏好<input name="materials" maxlength="100"></label>
+        <label>回答偏好<input name="reply_style" maxlength="100" placeholder="例如：简短、先说结论"></label>
+        <button type="submit">保存偏好</button>
+      </form>
+      <button id="memory-clear" type="button">清除偏好</button>
+      <button id="memory-export" type="button">导出记忆JSON</button>
+      <label>导入记忆JSON<input id="memory-file" type="file" accept=".json,application/json"></label>
+      <button id="memory-import" type="button">导入并替换偏好</button>
+      <div id="memory-status" role="status"></div>
+    </details>
+    <details class="kb-panel">
+      <summary>知识库管理</summary>
+      <p>本机店主使用。仅导入可供买家咨询的资料。</p>
+      <label for="kb-file">导入 TXT / Markdown 文件</label>
+      <input id="kb-file" type="file" accept=".txt,.md,text/plain,text/markdown">
+      <label for="kb-scope">资料适用范围</label>
+      <select id="kb-scope"><option value="">店铺通用</option></select>
+      <button id="kb-import" type="button">导入并建立索引</button>
+      <label for="shop-file">导入真实店铺JSON（完整替换）</label>
+      <input id="shop-file" type="file" accept=".json,application/json">
+      <button id="shop-import" type="button">保存店铺与商品</button>
+      <div id="kb-status" role="status"></div>
+      <div id="kb-documents"></div>
+    </details>
+    <div class="topic-label">你可以和我聊</div>
+    <div class="topics">
+      <button data-question="我想了解这款商品的材质和颜色。">材质、颜色与款式</button>
+      <button data-question="这款商品怎么选尺码？需要我提供什么信息？">尺码与适配</button>
+      <button data-question="这款商品应该怎么清洗和保养？">洗护与使用</button>
+      <button data-question="下单后多久发货？你能查我的物流吗？">配送与物流咨询</button>
+      <button data-question="尺码不合适能换吗？需要满足什么条件？">退货、换码咨询</button>
+      <button data-question="商品收到后发现质量问题，应该怎么办？">质量问题与人工核验</button>
+    </div>
+    <div class="sidebar-footer"><span class="status-dot"></span><span id="mode">正在连接…</span><small>v0.8 · 买家咨询</small></div>
+  </aside>
+  <main>
+    <header><span id="shop-name">店铺客服</span><span class="header-tag" id="shop-badge">正在连接</span></header>
+    <div id="messages" class="messages" aria-live="polite" aria-label="对话记录">
+      <section id="welcome" class="welcome">
+        <div class="eyebrow">YOUR SHOPPING & AFTER-SALES ASSISTANT</div>
+        <h1>选购有疑问，<br>售后有人答。</h1>
+        <p>关于材质、尺码、洗护与退换货，都可以问我。<br>通用服装问题可以直接问；具体款式请提供商品资料。</p>
+        <div class="suggestions">
+          <button data-question="纯棉和棉混纺有什么区别？纯棉一定不缩水吗？"><strong>了解商品 ↗</strong><span>面料、颜色与洗护说明</span></button>
+          <button data-question="不同品牌的M码一样吗？选衣服需要量哪些尺寸？"><strong>选对尺码 ↗</strong><span>按这款商品的尺码表核对</span></button>
+          <button data-question="帆布包的外部尺寸能判断是否装得下14寸电脑吗？"><strong>确认适配 ↗</strong><span>先核对尺寸，不盲目保证</span></button>
+          <button data-question="T恤洗过以后发现质量问题，还能咨询售后吗？"><strong>售后咨询 ↗</strong><span>分清具体情况与处理方式</span></button>
+        </div>
+      </section>
+    </div>
+    <div class="composer-wrap">
+      <div id="notice" class="notice" role="status"></div>
+      <form id="chat-form" class="composer">
+        <label class="product-label" for="product">咨询商品</label>
+        <select id="product"><option value="">尚未指定，请在问题中说明</option></select>
+        <label class="sr-only" for="question">商品或售后问题</label>
+        <textarea id="question" placeholder="例如：这款T恤怎么选码？鞋子开胶怎么办？…" rows="2" maxlength="6000" required></textarea>
+        <div class="composer-bottom"><span>Enter 发送 · Shift + Enter 换行</span><button id="send" type="submit">发送 ↑</button></div>
+      </form>
+      <p class="footnote" id="footnote">按已提供的商品与店铺资料回答；不查询订单或执行退款。请勿输入联系方式、地址或支付信息。</p>
+    </div>
+  </main>
+</body></html>

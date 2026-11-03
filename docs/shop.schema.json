@@ -1,0 +1,101 @@
+{
+  "$defs": {
+    "Product": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "pattern": "^[a-z0-9][a-z0-9_-]{0,59}$",
+          "title": "Id",
+          "type": "string"
+        },
+        "name": {
+          "maxLength": 100,
+          "minLength": 1,
+          "title": "Name",
+          "type": "string"
+        },
+        "aliases": {
+          "items": {
+            "type": "string"
+          },
+          "maxItems": 20,
+          "title": "Aliases",
+          "type": "array"
+        },
+        "price_cents": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Price Cents"
+        },
+        "specs": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "title": "Specs",
+          "type": "object"
+        },
+        "faq": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "title": "Faq",
+          "type": "object"
+        },
+        "after_sales": {
+          "default": "",
+          "maxLength": 5000,
+          "title": "After Sales",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "name"
+      ],
+      "title": "Product",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "name": {
+      "maxLength": 100,
+      "minLength": 1,
+      "title": "Name",
+      "type": "string"
+    },
+    "is_demo": {
+      "default": false,
+      "title": "Is Demo",
+      "type": "boolean"
+    },
+    "policies": {
+      "additionalProperties": {
+        "type": "string"
+      },
+      "title": "Policies",
+      "type": "object"
+    },
+    "products": {
+      "items": {
+        "$ref": "#/$defs/Product"
+      },
+      "maxItems": 100,
+      "title": "Products",
+      "type": "array"
+    }
+  },
+  "required": [
+    "name"
+  ],
+  "title": "ShopConfig",
+  "type": "object"
+}
